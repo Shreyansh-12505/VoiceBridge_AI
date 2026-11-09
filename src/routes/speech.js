@@ -2,6 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 import { extname } from "node:path";
 import requireAuth from "../middleware/requireAuth.js";
+import countCredits from "../middleware/checkCredits.js";
 
 const router = Router();
 
@@ -12,33 +13,53 @@ const upload = multer({
 
 // These routes require the user to be logged in.
 router.use(requireAuth);
-
+router.use(countCredits)
 // POST /speech/stt
 // Send a file using the form-data field name "audio".
 router.post("/stt", upload.single("audio"), async (req, res) => {
+  const startTime = Date.now();
+  
+  const job = await ProcessingJob.create({
+    userId: req.user._id,
+    jobType: "STT_ONLY",
+    status: "processing"
+  });
+
   try {
     if (!process.env.GNANI_API_KEY_ID) {
+      job.status = "failed";
+      job.errorMessage = "Gnani API key is not configured";
+      await job.save();
       return res.status(500).json({ error: "Gnani API key is not configured" });
     }
 
     if (!req.file) {
+      job.status = "failed";
+      job.errorMessage = "Choose an audio file";
+      await job.save();
       return res.status(400).json({ error: "Choose an audio file" });
     }
 
     const allowedExtensions = new Set([".wav", ".mp3", ".ogg", ".flac", ".aac", ".m4a"]);
     const extension = extname(req.file.originalname).toLowerCase();
+    
     if (!allowedExtensions.has(extension)) {
+      job.status = "failed";
+      job.errorMessage = "Invalid audio extension";
+      await job.save();
       return res.status(400).json({
         error: "Audio must be WAV, MP3, OGG, FLAC, AAC, or M4A",
       });
     }
 
     const model = String(req.body?.model || "prisma-v2.5");
-    
-    const defaultLang=model==="prisma-v3.0" ? "indic-auto" : "hi-IN";
-       const languageCode = String(req.body?.language_code || defaultLang);
+    const defaultLang = model === "prisma-v3.0" ? "indic-auto" : "hi-IN";
+    const languageCode = String(req.body?.language_code || defaultLang);
 
     if (!["prisma-v2.5", "prisma-v3.0"].includes(model)) {
+      job.status = "failed";
+      job.errorMessage = "Unsupported STT model";
+      await job.save();
       return res.status(400).json({ error: "Unsupported STT model" });
     }
 
@@ -71,16 +92,43 @@ router.post("/stt", upload.single("audio"), async (req, res) => {
       result = { message: responseText };
     }
 
+    const latency = Date.now() - startTime;
+
+    await ApiLog.create({
+      jobId: job._id,
+      userId: req.user._id,
+      serviceName: "GNANI_STT",
+      endpoint: "/stt/v3",
+      statusCode: gnaniResponse.status,
+      latencyMs: latency,
+      creditsBilled: 1
+    });
+
     if (!gnaniResponse.ok) {
+      job.status = "failed";
+      job.errorMessage = result.message || "Gnani STT request failed";
+      await job.save();
       return res.status(gnaniResponse.status).json({
         error: "Gnani STT request failed",
         details: result,
       });
     }
 
+    req.userDoc.creditsUsed += 1;
+    await req.userDoc.save();
+
+    job.status = "completed";
+    job.transcribedText = result.transcript;
+    job.sttLanguage = languageCode;
+    job.completedAt = new Date();
+    await job.save();
+
     return res.json(result);
   } catch (error) {
     console.error("STT error:", error);
+    job.status = "failed";
+    job.errorMessage = error.message;
+    await job.save();
     return res.status(500).json({ error: "Could not transcribe audio" });
   }
 });
@@ -186,9 +234,6 @@ router.get("/stt/batch/:id", async (req, res) => {
     return res.status(500).json({ error: "Could not check job status" });
   }
 });
-
-
-
 
 router.post("/tts", async (req, res) => {
   try {
