@@ -1,14 +1,15 @@
-import express from "express"
+import "dotenv/config";
 import app from "./src/app.js";
 import db from "./src/db/db.js";
-import dotenv from "dotenv"
-dotenv.config();
-db();
-app.use(express.json())
 
+const PORT = process.env.PORT || 3000;
 
-
-app.listen(3000,()=>{
-    console.log("server is running");
-    
-})
+try {
+  await db();
+  app.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
+  });
+} catch (error) {
+  console.error("Could not connect to the database:", error.message);
+  process.exit(1);
+}
