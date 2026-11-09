@@ -24,6 +24,10 @@ const userSchema=new mongoose.Schema({
         default:5000,
         min:0
      },
+     creditsUsed:{
+      type:Number,
+      default:0
+     }
    
 },
 {timestamps:true}
