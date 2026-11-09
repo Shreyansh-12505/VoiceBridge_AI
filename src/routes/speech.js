@@ -3,6 +3,8 @@ import multer from "multer";
 import { extname } from "node:path";
 import requireAuth from "../middleware/requireAuth.js";
 import countCredits from "../middleware/checkCredits.js";
+import ProcessingJob from "../models/processingJobs.models.js";
+import ApiLog from "../models/apiLogs.models.js";
 
 const router = Router();
 
@@ -135,12 +137,26 @@ router.post("/stt", upload.single("audio"), async (req, res) => {
 
 
 router.post("/stt/batch", upload.single("audio"), async (req, res) => {
+  const startTime = Date.now();
+
+  const job = await ProcessingJob.create({
+    userId: req.user._id,
+    jobType: "STT_ONLY",
+    status: "pending"
+  });
+
   try {
     if (!process.env.GNANI_API_KEY_ID) {
+      job.status = "failed";
+      job.errorMessage = "Gnani API key is not configured";
+      await job.save();
       return res.status(500).json({ error: "Gnani API key is not configured" });
     }
     
     if (!req.file) {
+      job.status = "failed";
+      job.errorMessage = "Choose an audio file";
+      await job.save();
       return res.status(400).json({ error: "Choose an audio file" });
     }
 
@@ -164,6 +180,9 @@ router.post("/stt/batch", upload.single("audio"), async (req, res) => {
 
     if (!createResponse.ok) {
       const errorText = await createResponse.text();
+      job.status = "failed";
+      job.errorMessage = errorText;
+      await job.save();
       return res.status(createResponse.status).json({ error: "Failed to create job", details: errorText });
     }
 
@@ -176,25 +195,62 @@ router.post("/stt/batch", upload.single("audio"), async (req, res) => {
     });
 
     if (!startResponse.ok) {
+      job.status = "failed";
+      job.errorMessage = "Failed to start job on Gnani servers";
+      await job.save();
       return res.status(startResponse.status).json({ error: "Failed to start job on Gnani servers" });
     }
 
+    const latency = Date.now() - startTime;
+
+    await ApiLog.create({
+      jobId: job._id,
+      userId: req.user._id,
+      serviceName: "GNANI_STT",
+      endpoint: "/stt/v3/batch/jobs",
+      statusCode: createResponse.status,
+      latencyMs: latency,
+      creditsBilled: 1
+    });
+
+    req.userDoc.creditsUsed += 1;
+    await req.userDoc.save();
+
+    job.status = "processing";
+    job.externalJobId = gnaniJobId;
+    job.sttLanguage = languageCode;
+    await job.save();
+
     return res.status(202).json({
       message: "Batch STT job successfully created and started.",
-      gnaniJobId: gnaniJobId 
+      jobId: job._id,
     });
 
   } catch (error) {
     console.error("Batch STT submission error:", error);
+    job.status = "failed";
+    job.errorMessage = error.message;
+    await job.save();
     return res.status(500).json({ error: "Could not process batch STT request" });
   }
 });
 
 router.get("/stt/batch/:id", async (req, res) => {
   try {
-    const gnaniJobId = req.params.id; 
+    const job = await ProcessingJob.findOne({
+      _id: req.params.id,
+      userId: req.user._id
+    });
 
-    const statusResponse = await fetch(`https://api.vachana.ai/stt/v3/batch/jobs/${gnaniJobId}`, {
+    if (!job) {
+      return res.status(404).json({ error: "Job not found" });
+    }
+
+    if (!job.externalJobId) {
+      return res.json({ status: job.status });
+    }
+
+    const statusResponse = await fetch(`https://api.vachana.ai/stt/v3/batch/jobs/${job.externalJobId}`, {
       method: "GET",
       headers: { "X-API-Key-ID": process.env.GNANI_API_KEY_ID },
     });
@@ -202,7 +258,7 @@ router.get("/stt/batch/:id", async (req, res) => {
     const statusData = await statusResponse.json();
 
     if (statusData.status === "COMPLETED") {
-      const filesResponse = await fetch(`https://api.vachana.ai/stt/v3/batch/jobs/${gnaniJobId}/files`, {
+      const filesResponse = await fetch(`https://api.vachana.ai/stt/v3/batch/jobs/${job.externalJobId}/files`, {
         method: "GET",
         headers: { "X-API-Key-ID": process.env.GNANI_API_KEY_ID },
       });
@@ -218,12 +274,20 @@ router.get("/stt/batch/:id", async (req, res) => {
         
         const transcriptText = await transcriptResponse.json();
 
+        job.status = "completed";
+        job.transcribedText = transcriptText.transcript || JSON.stringify(transcriptText);
+        job.completedAt = new Date();
+        await job.save();
+
         return res.json({ 
             status: "completed", 
             transcript: transcriptText 
         });
       }
     } else if (statusData.status === "FAILED") {
+        job.status = "failed";
+        job.errorMessage = "Batch job failed on Gnani servers";
+        await job.save();
         return res.json({ status: "failed" });
     }
 
@@ -412,9 +476,6 @@ router.post("/tts/stream", async (req, res) => {
       return res.end();
     }
 
-    req.userDoc.creditsUsed += 1;
-    await req.userDoc.save();
-
     const reader = gnaniResponse.body.getReader();
     const decoder = new TextDecoder();
 
@@ -425,6 +486,9 @@ router.post("/tts/stream", async (req, res) => {
       const chunk = decoder.decode(value, { stream: true });
       res.write(chunk);
     }
+
+    req.userDoc.creditsUsed += 1;
+    await req.userDoc.save();
 
     job.status = "completed";
     job.ttsLanguage = language;
@@ -450,7 +514,7 @@ router.post("/translate_voice",upload.single("audio"), async (req,res)=>{
   const startTime=Date.now()
   const job=await ProcessingJob.create({
     userId: req.user._id,
-    jobType:"FULL-CYCLE",
+    jobType:"FULL_CYCLE",
     status:"pending"
 
   })
