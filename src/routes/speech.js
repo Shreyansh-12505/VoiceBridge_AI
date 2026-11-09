@@ -236,8 +236,19 @@ router.get("/stt/batch/:id", async (req, res) => {
 });
 
 router.post("/tts", async (req, res) => {
+  const startTime = Date.now();
+
+  const job = await ProcessingJob.create({
+    userId: req.user._id,
+    jobType: "TTS_ONLY",
+    status: "processing"
+  });
+
   try {
     if (!process.env.GNANI_API_KEY_ID) {
+      job.status = "failed";
+      job.errorMessage = "Gnani API key is not configured";
+      await job.save();
       return res.status(500).json({ error: "Gnani API key is not configured" });
     }
 
@@ -247,61 +258,99 @@ router.post("/tts", async (req, res) => {
     const language = String(req.body?.language || "hi-IN");
 
     if (!text || !voice) {
-      return res.status(400).json({
-        error: "Provide text and a voice name",
-      });
+      job.status = "failed";
+      job.errorMessage = "Provide text and a voice name";
+      await job.save();
+      return res.status(400).json({ error: "Provide text and a voice name" });
     }
 
     if (!["timbre-v2.5", "timbre-v3.0"].includes(model)) {
+      job.status = "failed";
+      job.errorMessage = "Unsupported TTS model";
+      await job.save();
       return res.status(400).json({ error: "Unsupported TTS model" });
     }
 
-    const gnaniResponse = await fetch(
-      "https://api.vachana.ai/api/v1/tts/inference",
-      {
-        method: "POST",
-        headers: {
-          "X-API-Key-ID": process.env.GNANI_API_KEY_ID,
-          "Content-Type": "application/json",
+    const gnaniResponse = await fetch("https://api.vachana.ai/api/v1/tts/inference", {
+      method: "POST",
+      headers: {
+        "X-API-Key-ID": process.env.GNANI_API_KEY_ID,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text,
+        voice,
+        model,
+        language,
+        speed: 1.0,
+        audio_config: {
+          sample_rate: 48000,
+          num_channels: 1,
+          sample_width: 2,
+          encoding: "linear_pcm",
+          container: "wav",
         },
-        body: JSON.stringify({
-          text,
-          voice,
-          model,
-          language,
-          speed: 1.0,
-          audio_config: {
-            sample_rate: 48000,
-            num_channels: 1,
-            sample_width: 2,
-            encoding: "linear_pcm",
-            container: "wav",
-          },
-        }),
-      }
-    );
+      }),
+    });
+
+    const latency = Date.now() - startTime;
+
+    await ApiLog.create({
+      jobId: job._id,
+      userId: req.user._id,
+      serviceName: "GNANI_TTS",
+      endpoint: "/api/v1/tts/inference",
+      statusCode: gnaniResponse.status,
+      latencyMs: latency,
+      creditsBilled: 1
+    });
 
     if (!gnaniResponse.ok) {
       const details = await gnaniResponse.text();
+      job.status = "failed";
+      job.errorMessage = details || "Gnani TTS request failed";
+      await job.save();
       return res.status(gnaniResponse.status).json({
         error: "Gnani TTS request failed",
         details,
       });
     }
 
+    req.userDoc.creditsUsed += 1;
+    await req.userDoc.save();
+
+    job.status = "completed";
+    job.ttsLanguage = language;
+    job.ttsVoice = voice;
+    job.completedAt = new Date();
+    await job.save();
+
     const audio = Buffer.from(await gnaniResponse.arrayBuffer());
     res.set("Content-Type", gnaniResponse.headers.get("content-type") || "audio/wav");
     return res.send(audio);
   } catch (error) {
     console.error("TTS error:", error);
+    job.status = "failed";
+    job.errorMessage = error.message;
+    await job.save();
     return res.status(500).json({ error: "Could not generate speech" });
   }
 });
 
-
 router.post("/tts/stream", async (req, res) => {
+  const startTime = Date.now();
+
+  const job = await ProcessingJob.create({
+    userId: req.user._id,
+    jobType: "TTS_ONLY",
+    status: "processing"
+  });
+
   try {
     if (!process.env.GNANI_API_KEY_ID) {
+      job.status = "failed";
+      job.errorMessage = "Gnani API key is not configured";
+      await job.save();
       return res.status(500).json({ error: "Gnani API key is not configured" });
     }
 
@@ -311,6 +360,9 @@ router.post("/tts/stream", async (req, res) => {
     const language = String(req.body?.language || "hi-IN");
 
     if (!text || !voice) {
+      job.status = "failed";
+      job.errorMessage = "Provide text and a voice name";
+      await job.save();
       return res.status(400).json({ error: "Provide text and a voice name" });
     }
 
@@ -340,10 +392,28 @@ router.post("/tts/stream", async (req, res) => {
       }),
     });
 
+    const latency = Date.now() - startTime;
+
+    await ApiLog.create({
+      jobId: job._id,
+      userId: req.user._id,
+      serviceName: "GNANI_TTS",
+      endpoint: "/api/v1/tts/sse",
+      statusCode: gnaniResponse.status,
+      latencyMs: latency,
+      creditsBilled: 1
+    });
+
     if (!gnaniResponse.ok) {
+      job.status = "failed";
+      job.errorMessage = "Gnani SSE request failed";
+      await job.save();
       res.write(`event: error\ndata: ${JSON.stringify({ error: "Gnani SSE request failed" })}\n\n`);
       return res.end();
     }
+
+    req.userDoc.creditsUsed += 1;
+    await req.userDoc.save();
 
     const reader = gnaniResponse.body.getReader();
     const decoder = new TextDecoder();
@@ -356,15 +426,30 @@ router.post("/tts/stream", async (req, res) => {
       res.write(chunk);
     }
 
+    job.status = "completed";
+    job.ttsLanguage = language;
+    job.ttsVoice = voice;
+    job.completedAt = new Date();
+    await job.save();
+
     res.end();
   } catch (error) {
     console.error("TTS Streaming error:", error);
+    job.status = "failed";
+    job.errorMessage = error.message;
+    await job.save();
+    
     if (!res.headersSent) {
       return res.status(500).json({ error: "Could not stream audio" });
     }
     res.end();
   }
 });
+
+
+router.post("/speech,translate_voice",async (req,res)=>{
+  
+})
 
 
 router.get("/voices", (req, res) => {
