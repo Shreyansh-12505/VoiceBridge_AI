@@ -33,8 +33,10 @@ router.post("/stt", upload.single("audio"), async (req, res) => {
       });
     }
 
-    const languageCode = String(req.body?.language_code || "hi-IN");
     const model = String(req.body?.model || "prisma-v2.5");
+    
+    const defaultLang=model==="prisma-v3.0" ? "indic-auto" : "hi-IN";
+       const languageCode = String(req.body?.language_code || defaultLang);
 
     if (!["prisma-v2.5", "prisma-v3.0"].includes(model)) {
       return res.status(400).json({ error: "Unsupported STT model" });
