@@ -446,10 +446,185 @@ router.post("/tts/stream", async (req, res) => {
   }
 });
 
+router.post("/translate_voice",upload.single("audio"), async (req,res)=>{
+  const startTime=Date.now()
+  const job=await ProcessingJob.create({
+    userId: req.user._id,
+    jobType:"FULL-CYCLE",
+    status:"pending"
 
-router.post("/speech,translate_voice",async (req,res)=>{
-  
-})
+  })
+
+    try {
+    if (!process.env.GNANI_API_KEY_ID) {
+      job.status = "failed";
+      job.errorMessage = "Gnani API key is not configured";
+      await job.save();
+      return res.status(500).json({ error: "Gnani API key is not configured" });
+    }
+
+    if (!req.file) {
+      job.status = "failed";
+      job.errorMessage = "Choose an audio file";
+      await job.save();
+      return res.status(400).json({ error: "Choose an audio file" });
+    }
+
+    const allowedExtensions = new Set([".wav", ".mp3", ".ogg", ".flac", ".aac", ".m4a"]);
+    const extension = extname(req.file.originalname).toLowerCase();
+    
+    if (!allowedExtensions.has(extension)) {
+      job.status = "failed";
+      job.errorMessage = "Invalid audio extension";
+      await job.save();
+      return res.status(400).json({
+        error: "Audio must be WAV, MP3, OGG, FLAC, AAC, or M4A",
+      });
+    }
+
+    const targetVoice = String(req.body?.target_voice || "");
+    const targetLanguage = String(req.body?.target_language || "hi-IN");
+    const ttsModel = String(req.body?.tts_model || "timbre-v3.0"); // Timbre v3 is best for multilingual
+
+    if (!targetVoice) {
+      job.status = "failed";
+      job.errorMessage = "Provide a target_voice";
+      await job.save();
+      return res.status(400).json({ error: "Provide a target_voice for the output" });
+    }
+
+//step 1: speech to text
+const sttStartTime = Date.now();
+    const form = new FormData();
+    const audioBlob = new Blob([req.file.buffer], {
+      type: req.file.mimetype || "application/octet-stream",
+    });
+
+    form.append("audio_file", audioBlob, req.file.originalname);
+    form.append("language_code", "indic-auto"); // Always auto-detect input language
+    form.append("model", "prisma-v3.0");
+
+    const sttResponse = await fetch("https://api.vachana.ai/stt/v3", {
+      method: "POST",
+      headers: { "X-API-Key-ID": process.env.GNANI_API_KEY_ID },
+      body: form,
+    });
+
+    const sttLatency = Date.now() - sttStartTime;
+    const sttText = await sttResponse.text();
+    let sttResult;
+
+    try {
+      sttResult = JSON.parse(sttText);
+    } catch {
+      sttResult = { message: sttText };
+    }
+
+    await ApiLog.create({
+      jobId: job._id,
+      userId: req.user._id,
+      serviceName: "GNANI_STT",
+      endpoint: "/stt/v3",
+      statusCode: sttResponse.status,
+      latencyMs: sttLatency,
+      creditsBilled: 1
+    });
+
+    if (!sttResponse.ok) {
+      job.status = "failed";
+      job.errorMessage = sttResult.message || "STT Step Failed";
+      await job.save();
+      return res.status(sttResponse.status).json({
+        error: "STT Step Failed",
+        details: sttResult,
+      });
+    }
+
+    const transcribedText = sttResult.transcript;
+
+    if (!transcribedText) {
+      job.status = "failed";
+      job.errorMessage = "No text transcribed from audio";
+      await job.save();
+      return res.status(400).json({ error: "Could not transcribe any text from the provided audio." });
+    }
+
+    //step 2:text to speech 
+
+    const ttsStartTime = Date.now();
+    
+    const ttsResponse = await fetch("https://api.vachana.ai/api/v1/tts/inference", {
+      method: "POST",
+      headers: {
+        "X-API-Key-ID": process.env.GNANI_API_KEY_ID,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text: transcribedText, 
+        voice: targetVoice,
+        model: ttsModel,
+        language: targetLanguage,
+        speed: 1.0,
+        audio_config: {
+          sample_rate: 48000,
+          num_channels: 1,
+          sample_width: 2,
+          encoding: "linear_pcm",
+          container: "wav",
+        },
+      }),
+    });
+
+    const ttsLatency = Date.now() - ttsStartTime;
+
+    await ApiLog.create({
+      jobId: job._id,
+      userId: req.user._id,
+      serviceName: "GNANI_TTS",
+      endpoint: "/api/v1/tts/inference",
+      statusCode: ttsResponse.status,
+      latencyMs: ttsLatency,
+      creditsBilled: 1
+    });
+
+    if (!ttsResponse.ok) {
+      const ttsDetails = await ttsResponse.text();
+      job.status = "failed";
+      job.errorMessage = ttsDetails || "TTS Step Failed";
+      await job.save();
+      return res.status(ttsResponse.status).json({
+        error: "TTS Step Failed",
+        details: ttsDetails,
+      });
+    }
+req.userDoc.creditsUsed += 2;
+    await req.userDoc.save();
+
+    job.status = "completed";
+    job.transcribedText = transcribedText;
+    job.sttLanguage = "indic-auto";
+    job.ttsLanguage = targetLanguage;
+    job.ttsVoice = targetVoice;
+    job.completedAt = new Date();
+    await job.save();
+
+    const finalAudio = Buffer.from(await ttsResponse.arrayBuffer());
+    
+    // Add custom header so frontend knows what was originally spoken 
+    // Encode to base64 to safely pass Hindi/Indic characters in HTTP headers
+    res.set("X-Transcribed-Text", Buffer.from(transcribedText).toString("base64"));
+    res.set("Content-Type", ttsResponse.headers.get("content-type") || "audio/wav");
+    
+    return res.send(finalAudio);
+
+  } catch (error) {
+    console.error("Full-Cycle Translation error:", error);
+    job.status = "failed";
+    job.errorMessage = error.message;
+    await job.save();
+    return res.status(500).json({ error: "Could not complete the translation cycle" });
+  }
+});
 
 
 router.get("/voices", (req, res) => {
