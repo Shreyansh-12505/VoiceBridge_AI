@@ -7,8 +7,8 @@ const router = Router();
 
 const cookieOptions = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: "lax",
+  secure: true, // Must be true for sameSite: "none" over HTTPS
+  sameSite: "none",
   path: "/",
 };
 
