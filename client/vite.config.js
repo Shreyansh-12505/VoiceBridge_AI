@@ -3,5 +3,19 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  server: { proxy: { '/auth': 'http://localhost:3000', '/speech': { target: 'http://localhost:3000', ws: true } } },
+  server: {
+    proxy: {
+      '/auth': {
+        target: 'https://voicebridge-ai-3zos.onrender.com',
+        changeOrigin: true,
+        secure: true,
+      },
+      '/speech': {
+        target: 'https://voicebridge-ai-3zos.onrender.com',
+        changeOrigin: true,
+        secure: true,
+        ws: true,
+      },
+    },
+  },
 })

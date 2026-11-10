@@ -21,8 +21,12 @@ function useToast() {
   return [toast, show, () => setToast(null)]
 }
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://voicebridge-ai-3zos.onrender.com').replace(/\/+$/, '')
+const WS_BASE_URL = (import.meta.env.VITE_WS_BASE_URL || 'wss://voicebridge-ai-3zos.onrender.com').replace(/\/+$/, '')
+
 async function api(path, options = {}) {
-  const response = await fetch(path, { credentials: 'include', ...options })
+  const url = path.startsWith('http') ? path : `${API_BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`
+  const response = await fetch(url, { credentials: 'include', ...options })
   const type = response.headers.get('content-type') || ''
   const payload = type.includes('application/json') ? await response.json() : null
   if (!response.ok) {
@@ -150,9 +154,8 @@ function Realtime({ toast }) {
       streamRef.current = stream
       const AudioCtx = window.AudioContext || window.webkitAudioContext
       const context = new AudioCtx(); audioContextRef.current = context; await context.resume()
-      const secure = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const params = new URLSearchParams({ model, language_code: language, sample_rate: '16000', format })
-      const ws = new WebSocket(`${secure}//${window.location.host}/speech/realtime?${params}`); socketRef.current = ws
+      const ws = new WebSocket(`${WS_BASE_URL}/speech/realtime?${params}`); socketRef.current = ws
       ws.binaryType = 'arraybuffer'
       ws.onmessage = event => {
         let data
