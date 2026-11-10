@@ -4,6 +4,9 @@ import app from "./src/app.js";
 import db from "./src/db/db.js";
 import attachRealtimeSTT from "./src/realtime/sttWebSocket.js";
 
+app.get('/', (req, res) => {
+  res.status(200).json({ status: 'online', message: 'VoiceBridge AI API is running' });
+});
 const PORT = process.env.PORT || 3000;
 const server = createServer(app);
 attachRealtimeSTT(server);
