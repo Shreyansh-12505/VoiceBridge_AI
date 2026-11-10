@@ -29,9 +29,17 @@ const WS_BASE_URL = (import.meta.env.VITE_WS_BASE_URL || API_BASE_URL.replace(/^
 
 async function api(path, options = {}) {
   const url = path.startsWith('http') ? path : `${API_BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`
-  const response = await fetch(url, { credentials: 'include', ...options })
+  const token = localStorage.getItem('vb_token')
+  
+  const headers = {
+    ...options.headers,
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  }
+
+  const response = await fetch(url, { credentials: 'include', ...options, headers })
   const type = response.headers.get('content-type') || ''
   const payload = type.includes('application/json') ? await response.json() : null
+  
   if (!response.ok) {
     const detail = payload?.message || payload?.error || payload?.details
     throw new Error(typeof detail === 'string' ? detail : response.status === 403 ? 'You do not have enough credits to run this translation.' : `Request failed (${response.status}).`)
@@ -57,7 +65,13 @@ function AuthGate({ onLogin, toast }) {
         headers: { 'Content-Type': 'application/json' }, 
         body: JSON.stringify(payloadData) 
       })
-      const userData = payload?.user ? (payload.token ? { ...payload.user, token: payload.token } : payload.user) : payload
+
+      const extractedToken = payload?.token || payload?.accessToken
+      if (extractedToken) {
+        localStorage.setItem('vb_token', extractedToken)
+      }
+
+      const userData = payload?.user ? { ...payload.user, token: extractedToken || payload.user.token } : payload
       onLogin(userData)
     } catch (error) { 
       toast(error.message) 
@@ -148,7 +162,7 @@ function DropArea({ file, setFile, toast }) {
             <strong>{file.name}</strong>
             <span>{(file.size / (1024 * 1024)).toFixed(file.size < 100000 ? 3 : 1)} MB · ready to translate</span>
           </div>
-          <button className="icon-button remove-file" onClick={() => setFile(null)} aria-label="Remove audio file">
+          <button type="button" className="icon-button remove-file" onClick={() => setFile(null)} aria-label="Remove audio file">
             <X size={17} />
           </button>
         </>
@@ -325,7 +339,7 @@ function FullCycle({ voices, voicesLoading, toast, onCredits }) {
             <div className="result-top">
               <div className="result-icon"><Check size={18} /></div>
               <div><span className="section-kicker">TRANSLATION COMPLETE</span><h3>Your audio is ready</h3></div>
-              <button className="icon-button" aria-label="Clear result" onClick={() => { URL.revokeObjectURL(audioUrl); setAudioUrl(''); setTranscript('') }}>
+              <button type="button" className="icon-button" aria-label="Clear result" onClick={() => { URL.revokeObjectURL(audioUrl); setAudioUrl(''); setTranscript('') }}>
                 <X size={17} />
               </button>
             </div>
@@ -462,7 +476,7 @@ function Realtime({ toast, user }) {
       audioContextRef.current = context
       await context.resume()
 
-      const token = user?.token || user?.accessToken
+      const token = user?.token || user?.accessToken || localStorage.getItem('vb_token')
       const params = new URLSearchParams({ model, language_code: language, sample_rate: '16000', format })
       if (token) params.append('token', token)
 
@@ -572,6 +586,7 @@ function Realtime({ toast, user }) {
             <div className="bubble-facet facet-two"/>
             <div className="bubble-facet facet-three"/>
             <button 
+              type="button"
               className={`mic-button ${connected ? 'active' : ''}`} 
               onClick={toggle} 
               aria-label={connected ? 'Stop recording' : 'Start recording'} 
@@ -587,6 +602,7 @@ function Realtime({ toast, user }) {
           {status === 'connecting' ? 'Connecting to live transcription…' : connected ? <>Listening now <span className="recording-time">{displayTime}</span></> : 'Ready when you are'}
         </div>
         <button 
+          type="button"
           className={`button ${connected ? 'button-stop' : 'button-primary'} mic-action`} 
           onClick={toggle} 
           disabled={status === 'connecting'}
@@ -620,7 +636,7 @@ function Realtime({ toast, user }) {
         </div>
         <div className="transcript-bottom">
           <span><span className={`status-indicator ${connected ? 'green' : ''}`} />{connected ? 'Transcription is active' : 'Transcript will appear here'}</span>
-          <button className="clear-button" onClick={() => setTranscript([])} disabled={!transcript.length}>
+          <button type="button" className="clear-button" onClick={() => setTranscript([])} disabled={!transcript.length}>
             <RotateCcw size={13} /> Clear
           </button>
         </div>
@@ -691,7 +707,9 @@ export default function App() {
           setUser(userData)
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        localStorage.removeItem('vb_token')
+      })
       .finally(() => { if (active) setAuthLoading(false) })
     return () => { active = false }
   }, [])
@@ -709,6 +727,7 @@ export default function App() {
 
   const logout = async () => { 
     try { await api('/auth/logout', { method: 'POST' }) } catch {} 
+    localStorage.removeItem('vb_token')
     setUser(null); setVoices([]); setSessionCredits(0) 
   }
 
@@ -741,7 +760,7 @@ export default function App() {
               <div className="user-menu">
                 <div className="user-avatar">{(user.username || user.email || 'U').slice(0, 1).toUpperCase()}</div>
                 <span className="user-name">{user.username || user.email}</span>
-                <button className="icon-button logout-button" aria-label="Sign out" onClick={logout} title="Sign out"><LogOut size={16} /></button>
+                <button type="button" className="icon-button logout-button" aria-label="Sign out" onClick={logout} title="Sign out"><LogOut size={16} /></button>
               </div>
             </div>
           </header>
@@ -782,7 +801,7 @@ export default function App() {
         <div className={`toast ${toast.kind}`} role="status">
           <span className="toast-symbol">{toast.kind === 'success' ? <Check size={15} /> : <X size={15} />}</span>
           <span>{toast.message}</span>
-          <button onClick={dismissToast} aria-label="Dismiss notification"><X size={15} /></button>
+          <button type="button" onClick={dismissToast} aria-label="Dismiss notification"><X size={15} /></button>
         </div>
       )}
     </>
