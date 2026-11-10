@@ -23,7 +23,12 @@ function rejectUpgrade(socket, status, message) {
   socket.destroy();
 }
 
-function getToken(request) {
+function getToken(request, requestUrl) {
+  // 1. Check query parameter first (fixes cross-domain WebSocket issues)
+  const queryToken = requestUrl.searchParams.get("token");
+  if (queryToken) return queryToken;
+
+  // 2. Fall back to reading from the cookie header
   const cookieHeader = request.headers.cookie || "";
   const tokenPair = cookieHeader
     .split(";")
@@ -40,7 +45,7 @@ function getToken(request) {
 }
 
 function isOriginAllowed(origin) {
-  if (!origin) return true; // Non-browser clients such as Postman may omit Origin.
+  if (!origin) return true;
 
   const configuredOrigins = (process.env.FRONTEND_ORIGIN || "")
     .split(",")
@@ -110,7 +115,7 @@ export default function attachRealtimeSTT(server) {
       return rejectUpgrade(socket, 403, "Origin is not allowed");
     }
 
-    const token = getToken(request);
+    const token = getToken(request, requestUrl);
     if (!token || !process.env.JWT_SECRET) {
       return rejectUpgrade(socket, 401, "Please log in first");
     }
