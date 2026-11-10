@@ -6,7 +6,22 @@ import authRoutes from "./routes/auth.js";
 import speechRoutes from "./routes/speech.js";
 
 const app = express()
-app.use(cors({ origin: true, credentials: true }));
+const allowedOrigins = new Set([
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:4173",
+  "http://127.0.0.1:4173",
+  ...(process.env.FRONTEND_ORIGIN || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+]);
+app.use(cors({
+  origin(origin, callback) {
+    callback(null, !origin || allowedOrigins.has(origin));
+  },
+  credentials: true,
+}));
 app.use(morgan("dev"));
 app.use(express.json());
 app.use(cookieParser());

@@ -42,9 +42,11 @@ function getToken(request) {
 function isOriginAllowed(origin) {
   if (!origin) return true; // Non-browser clients such as Postman may omit Origin.
 
-  if (process.env.FRONTEND_ORIGIN) {
-    return origin === process.env.FRONTEND_ORIGIN;
-  }
+  const configuredOrigins = (process.env.FRONTEND_ORIGIN || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (configuredOrigins.length) return configuredOrigins.includes(origin);
 
   try {
     const hostname = new URL(origin).hostname;
