@@ -24,8 +24,10 @@ function useToast() {
   return [toast, show, () => setToast(null)]
 }
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://voicebridge-ai-3zos.onrender.com').replace(/\/+$/, '')
-const WS_BASE_URL = (import.meta.env.VITE_WS_BASE_URL || API_BASE_URL.replace(/^http/, 'ws')).replace(/\/+$/, '')
+// Use the current origin by default so Vite's local proxy and same-origin
+// production deployments handle both API requests and auth cookies correctly.
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')
+const WS_BASE_URL = (import.meta.env.VITE_WS_BASE_URL || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`).replace(/\/+$/, '')
 
 async function api(path, options = {}) {
   const url = path.startsWith('http') ? path : `${API_BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`
@@ -700,6 +702,13 @@ export default function App() {
 
   useEffect(() => {
     let active = true
+    // Login and registration persist the bearer token locally. Avoid making an
+    // unauthenticated /auth/me request on every fresh visit (which produces a
+    // noisy, expected 401 in the browser console).
+    if (!localStorage.getItem('vb_token')) {
+      setAuthLoading(false)
+      return () => { active = false }
+    }
     api('/auth/me')
       .then(({ payload }) => {
         if (active) {

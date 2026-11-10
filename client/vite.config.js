@@ -1,17 +1,19 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+const apiTarget = process.env.VITE_PROXY_TARGET || 'http://localhost:3000'
+
 export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
       '/auth': {
-        target: 'https://voicebridge-ai-3zos.onrender.com',
+        target: apiTarget,
         changeOrigin: true,
         secure: true,
       },
       '/speech': {
-        target: 'https://voicebridge-ai-3zos.onrender.com',
+        target: apiTarget,
         changeOrigin: true,
         secure: true,
         ws: true,
