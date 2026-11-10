@@ -45,20 +45,7 @@ function getToken(request, requestUrl) {
 }
 
 function isOriginAllowed(origin) {
-  if (!origin) return true;
-
-  const configuredOrigins = (process.env.FRONTEND_ORIGIN || "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-  if (configuredOrigins.length) return configuredOrigins.includes(origin);
-
-  try {
-    const hostname = new URL(origin).hostname;
-    return hostname === "localhost" || hostname === "127.0.0.1";
-  } catch {
-    return false;
-  }
+  return true;
 }
 
 function getStreamSettings(url) {

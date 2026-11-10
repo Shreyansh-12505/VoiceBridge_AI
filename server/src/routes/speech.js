@@ -13,6 +13,50 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB upload limit
 });
 
+// Voice catalog is public and does not require authentication or credit deduction.
+router.get("/voices", (req, res) => {
+  const model = String(req.query?.model || "timbre-v3.0");
+
+  const catalog = {
+    "timbre-v3.0": {
+      model: "timbre-v3.0",
+      description: "Expressive audio-tagged multilingual voices",
+      supportedLanguages: ["hi-IN", "en-IN", "ta-IN", "te-IN", "kn-IN", "ml-IN", "mr-IN", "pa-IN", "bn-IN", "gu-IN"],
+      voices: [
+        { name: "Avinash", gender: "Male" },
+        { name: "Chetana", gender: "Female" },
+        { name: "Devansh", gender: "Male" },
+        { name: "Kalpana", gender: "Female" },
+        { name: "Lakshmi", gender: "Female" },
+        { name: "Prakash", gender: "Male" },
+        { name: "Riyaa", gender: "Female" },
+        { name: "Shivani", gender: "Female" },
+        { name: "Shubham", gender: "Male" },
+        { name: "Tarika", gender: "Female" },
+        { name: "Vasudha", gender: "Female" },
+        { name: "Yashraj", gender: "Male" },
+      ],
+    },
+
+    "timbre-v2.5": {
+      model: "timbre-v2.5",
+      description: "Regional targeted voices",
+      supportedLanguages: ["hi-IN", "en-IN", "ta-IN", "te-IN", "kn-IN", "ml-IN", "mr-IN", "pa-IN", "bn-IN", "gu-IN"],
+      voices: [
+        { name: "Nalini", gender: "Female", defaultLanguage: "hi-IN" },
+        { name: "Kaveri", gender: "Female", defaultLanguage: "hi-IN" },
+        { name: "Asmita", gender: "Female", defaultLanguage: "hi-IN" },
+        { name: "Suhana", gender: "Female", defaultLanguage: "hi-IN" },
+        { name: "Poorvi", gender: "Female", defaultLanguage: "hi-IN" },
+        { name: "Deepak", gender: "Male", defaultLanguage: "hi-IN" },
+      ],
+    },
+  };
+
+  const selectedCatalog = catalog[model] || catalog["timbre-v3.0"];
+  return res.json(selectedCatalog);
+});
+
 // These routes require the user to be logged in.
 router.use(requireAuth);
 router.use(countCredits)
@@ -694,49 +738,6 @@ req.userDoc.creditsUsed += 2;
 });
 
 
-router.get("/voices", (req, res) => {
-  const model = String(req.query?.model || "timbre-v3.0");
-
-  const catalog = {
-    
-    "timbre-v3.0": {
-      model: "timbre-v3.0",
-      description: "Expressive audio-tagged multilingual voices",
-      supportedLanguages: ["hi-IN", "en-IN", "ta-IN", "te-IN", "kn-IN", "ml-IN", "mr-IN", "pa-IN", "bn-IN", "gu-IN"],
-      voices: [
-        { name: "Avinash", gender: "Male" },
-        { name: "Chetana", gender: "Female" },
-        { name: "Devansh", gender: "Male" },
-        { name: "Kalpana", gender: "Female" },
-        { name: "Lakshmi", gender: "Female" },
-        { name: "Prakash", gender: "Male" },
-        { name: "Riyaa", gender: "Female" },
-        { name: "Shivani", gender: "Female" },
-        { name: "Shubham", gender: "Male" },
-        { name: "Tarika", gender: "Female" },
-        { name: "Vasudha", gender: "Female" },
-        { name: "Yashraj", gender: "Male" },
-      ],
-    },
-
-    "timbre-v2.5": {
-      model: "timbre-v2.5",
-      description: "Regional targeted voices",
-      supportedLanguages: ["hi-IN", "en-IN", "ta-IN", "te-IN", "kn-IN", "ml-IN", "mr-IN", "pa-IN", "bn-IN", "gu-IN"],
-      voices: [
-        { name: "Nalini", gender: "Female", defaultLanguage: "hi-IN" },
-        { name: "Kaveri", gender: "Female", defaultLanguage: "hi-IN" },
-        { name: "Asmita", gender: "Female", defaultLanguage: "hi-IN" },
-        { name: "Suhana", gender: "Female", defaultLanguage: "hi-IN" },
-        { name: "Poorvi", gender: "Female", defaultLanguage: "hi-IN" },
-        { name: "Deepak", gender: "Male", defaultLanguage: "hi-IN" },
-      ],
-    },
-  };
-
-  const selectedCatalog = catalog[model] || catalog["timbre-v3.0"];
-  return res.json(selectedCatalog);
-});
 // Multer runs before the STT route handler, so handle upload errors here.
 router.use((error, req, res, next) => {
   if (error instanceof multer.MulterError) {

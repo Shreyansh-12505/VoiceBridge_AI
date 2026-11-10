@@ -5,10 +5,11 @@ import User from "../models/user.models.js";
 
 const router = Router();
 
+const isProd = process.env.NODE_ENV === "production";
 const cookieOptions = {
   httpOnly: true,
-  secure: true, // Must be true for sameSite: "none" over HTTPS
-  sameSite: "none",
+  secure: isProd,
+  sameSite: isProd ? "none" : "lax",
   path: "/",
 };
 
@@ -47,8 +48,9 @@ router.post("/register", async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 12);
     const user = await User.create({ username, email, passwordHash });
 
-    res.cookie("token", createToken(user._id), cookieOptions);
-    return res.status(201).json({ user: publicUser(user) });
+    const token = createToken(user._id);
+    res.cookie("token", token, cookieOptions);
+    return res.status(201).json({ token, user: publicUser(user) });
   } catch (error) {
     if (error.code === 11000) {
       return res.status(409).json({ error: "Username or email is already registered" });
@@ -74,8 +76,9 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ error: "Incorrect email or password" });
     }
 
-    res.cookie("token", createToken(user._id), cookieOptions);
-    return res.json({ user: publicUser(user) });
+    const token = createToken(user._id);
+    res.cookie("token", token, cookieOptions);
+    return res.json({ token, user: publicUser(user) });
   } catch (error) {
     console.error("Login error:", error);
     return res.status(500).json({ error: "Could not log in" });
@@ -84,7 +87,9 @@ router.post("/login", async (req, res) => {
 
 
 router.get("/me", async (req, res) => {
-  const token = req.cookies?.token;
+  const authHeader = req.headers.authorization;
+  const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  const token = req.cookies?.token || bearerToken;
   if (!token) {
     return res.status(401).json({ error: "Please log in first" });
   }
