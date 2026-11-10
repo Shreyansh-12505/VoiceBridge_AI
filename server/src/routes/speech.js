@@ -17,9 +17,7 @@ const upload = multer({
 router.use(requireAuth);
 router.use(countCredits)
 
-app.get('/', (req, res) => {
-  res.status(200).json({ status: 'online', message: 'VoiceBridge AI API is running' });
-});
+
 
 // POST /speech/stt
 // Send a file using the form-data field name "audio".

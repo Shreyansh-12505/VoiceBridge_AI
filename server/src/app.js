@@ -5,7 +5,14 @@ import morgan from "morgan";
 import authRoutes from "./routes/auth.js";
 import speechRoutes from "./routes/speech.js";
 
+
+
+
 const app = express()
+app.get('/', (req, res) => {
+  res.status(200).json({ status: 'online', message: 'VoiceBridge AI API is running' });
+});
+
 const allowedOrigins = new Set([
   "http://localhost:5173",
   "http://127.0.0.1:5173",
